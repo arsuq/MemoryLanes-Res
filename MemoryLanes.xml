@@ -1,0 +1,2006 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>MemoryLanes</name>
+    </assembly>
+    <members>
+        <member name="T:System.Collections.Concurrent.Tesseract`1">
+            <summary>
+            A virtual contiguous array backed by a 4D cube of jagged arrays. 
+            Unlike the linked list based concurrent structures, supports indexed RW while expanding.
+            The capacity is int.MaxValue slots.
+            </summary>
+            <remarks>
+            One must inspect the Drive property before accessing the API and assert that the 
+            concurrency mode (Gear) allows the operation. If not, one must wait for the Clutch()
+            to transition into a correct one.
+            </remarks>
+            <typeparam name="T">A class</typeparam>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.#ctor(System.Collections.Concurrent.TesseractExpansion)">
+            <summary>
+            Inits a hypercube with a SIDE number of slots. 
+            </summary>
+            <param name="expansion">If not set DEF_EXP is used.</param>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.#ctor(System.Int32,System.Boolean,System.Collections.Concurrent.TesseractExpansion)">
+            <summary>
+            Initializes the cube. If preallocating, note that the AppendIndex is -1 and the setter will blow 
+            unless one uses Append() or MoveAppendIndex() to AllocatedSlots for example.
+            </summary>
+            <param name="slots">To preallocate. If not 0, the min value is SIDE.</param>
+            <param name="countNotNulls">Can be set only here.</param>
+            <param name="expansion">A callback that must return the desired AllocatedSlots count.</param>
+        </member>
+        <member name="F:System.Collections.Concurrent.Tesseract`1.Side">
+            <summary>
+            The virtual array increment length.
+            </summary>
+        </member>
+        <member name="F:System.Collections.Concurrent.Tesseract`1.DefaultExpansion">
+            <summary>
+            The number of slots to be added if no Expansion function is provided.
+            </summary>
+        </member>
+        <member name="F:System.Collections.Concurrent.Tesseract`1.CountNotNulls">
+            <summary>
+            If true Append and set will update the ItemsCount.
+            </summary>
+        </member>
+        <member name="F:System.Collections.Concurrent.Tesseract`1.Expansion">
+            <summary>
+            The growth function.
+            </summary>
+        </member>
+        <member name="P:System.Collections.Concurrent.Tesseract`1.AppendIndex">
+            <summary>
+            The current set index. 
+            </summary>
+        </member>
+        <member name="P:System.Collections.Concurrent.Tesseract`1.ItemsCount">
+            <summary>
+            The not null items count, -1 if CountNotNulls is false.
+            </summary>
+        </member>
+        <member name="P:System.Collections.Concurrent.Tesseract`1.AllocatedSlots">
+            <summary>
+            The allocated slots.
+            </summary>
+        </member>
+        <member name="P:System.Collections.Concurrent.Tesseract`1.Drive">
+            <summary>
+            The allowed set of concurrent operations.
+            </summary>
+        </member>
+        <member name="E:System.Collections.Concurrent.Tesseract`1.OnGearShift">
+            <summary>
+            Will be triggered when the Drive changes. 
+            The callbacks are invoked in a new Task, all exceptions are swallowed.
+            </summary>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.OnGearShiftReset">
+            <summary>
+            Clears the subscribers.
+            </summary>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.Clutch(System.Collections.Concurrent.TesseractGear,System.Action,System.Int32)">
+            <summary>
+            Shifts the gear and blocks until all operations in the old drive mode complete.
+            If OnGearShift is not null it's launched in a new Task, wrapped in a try catch block,
+            swallowing all potential exceptions.
+            </summary>
+            <param name="g">The new concurrent mode.</param>
+            <param name="f">Guarantees the execution of f() within the lock scope, in case that other shifts are waiting.</param>
+            <param name="timeout">In milliseconds, by default is -1, which is indefinitely.</param>
+            <returns>The old gear.</returns>
+            <exception cref="T:System.SynchronizationException">Code.SignalAwaitTimeout</exception>
+        </member>
+        <member name="P:System.Collections.Concurrent.Tesseract`1.Item(System.Int32)">
+            <summary>
+            Access to the individual cells.
+            </summary>
+            <param name="index">Must be less than AllocatedSlots</param>
+            <returns>The object reference at the index</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">index</exception>
+            <exception cref="T:System.InvalidOperationException">If the Drive is wrong</exception>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.Take(System.Int32)">
+            <summary>
+            Takes the item at index and swaps it with null as one atomic operation.
+            </summary>
+            <remarks>
+            One can use Take() and Append() in multi-producer, multi-consumer scenarios, since both are safe,
+            </remarks>
+            <param name="index">The position in the array, must be less than AllocatedSlots.</param>
+            <returns>The reference at index.</returns>
+            <exception cref="T:System.InvalidOperationException">When Drive is P.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">The index is negative or beyond AllocatedSlots.</exception>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.CAS(System.Int32,`0,`0)">
+            <summary>
+            Sets value at index if the current value equals the comparand.
+            </summary>
+            <param name="index">The index must be less than AllocatedSlots.</param>
+            <param name="value">The value to be set at index.</param>
+            <param name="comparand">Will be compared to this[index]</param>
+            <returns>The original value at index.</returns>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.Append(`0)">
+            <summary>
+            Appends item after the AppendIndex. 
+            If there is no free space left locks until enough blocks are
+            allocated and then switches back to fully concurrent mode.
+            </summary>
+            <remarks>
+            If the Expansion callback throws or out-of-memory is thrown the cube should be considered unrecoverable.
+            In that situation the gear will be jammed in Straight position and there is no way to shift it.
+            If there are ongoing Clutch calls they will wait until their timeouts expire or forever (the default).
+            </remarks>
+            <param name="item">The object reference</param>
+            <returns>The index of the item, -1 if fails.</returns>
+            <exception cref="T:System.InvalidOperationException">When Drive != Gear.Straight</exception>
+            <exception cref="T:System.OutOfMemoryException"></exception>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.RemoveLast(System.Int32@)">
+            <summary>
+            Nulls the AppendIndex cell, decrements the AppendIndex value and returns the item that was there.
+            </summary>
+            <param name="pos">The item position.</param>
+            <returns>The removed item.</returns>
+            <exception cref="T:System.InvalidOperationException">When Drive != Gear.Reverse</exception>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.Remove(`0)">
+            <summary>
+            Looks for the item and nulls the array cell.
+            </summary>
+            <param name="item">The object reference</param>
+            <returns>True if found and null-ed</returns>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.NotNullItems(System.Boolean,System.Boolean)">
+            <summary>
+            Iterates all cells from 0 up to AppendIndex and yields each item
+            if it's not null at the time of the check.
+            </summary>
+            <param name="assertGear">If true volatile-reads the Drive at each iteration. False by default. </param>
+            <returns>A not null item.</returns>
+            <exception cref="T:System.InvalidOperationException">If the Drive is P</exception>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.IndexOf(`0)">
+            <summary>
+            Searches for an item by traversing all cells up to AppendIndex.
+            The reads are volatile, the comparison Object.Equals().
+            </summary>
+            <param name="item">The object ref</param>
+            <returns>A positive value if the item is found, -1 otherwise.</returns>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.Resize(System.Int32,System.Boolean)">
+            <summary>
+            Expands or shrinks the virtual array to the number of SIDE tiles fitting the requested length.
+            If the AppendIndex is greater that the new length, it's cut to length -1.
+            If shrinking and counting, the number of not-null values (ItemsCount) is also updated.
+            The Drive must be P when shrinking. 
+            </summary>
+            <param name="length">The new length.</param>
+            <param name="expand">The intent of the caller.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException">If length is negative</exception>
+            <exception cref="T:System.InvalidOperationException">
+            If the Drive is not P when shrinking.</exception>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.Format(`0)">
+            <summary>
+            Sets the provided item (ref or null) to all available cells.
+            The Drive must be N.
+            </summary>
+            <remarks>The method is synchronized.</remarks>
+            <param name="item">The ref to be set</param>
+            <exception cref="T:System.InvalidOperationException">Drive is not N or Straight</exception>
+        </member>
+        <member name="M:System.Collections.Concurrent.Tesseract`1.MoveAppendIndex(System.Int32,System.Boolean)">
+            <summary>
+            Moves the AppendIndex to a new position. If not forced, the drive must be N or P.
+            </summary>
+            <param name="newIndex">The new index.</param>
+            <param name="forced">If true, blindly swaps the AppendIndex with newIndex,
+            regardless the Drive mode or the AllocatedSlots count.</param>
+            <exception cref="T:System.InvalidOperationException">The Drive is not N or P</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">Index is negative or greater than AllocatedSlots</exception>
+        </member>
+        <member name="F:System.Collections.Concurrent.Tesseract`1.SIDE">
+            <summary>
+            A block length = 256.
+            </summary>
+        </member>
+        <member name="F:System.Collections.Concurrent.Tesseract`1.DEF_EXP">
+            <summary>
+            The default cube Expansion = 2^13 slots.
+            </summary>
+        </member>
+        <member name="T:System.Collections.Concurrent.TesseractCell`1">
+            <summary>
+            For structs wrapping. 
+            </summary>
+            <typeparam name="T">A struct</typeparam>
+        </member>
+        <member name="T:System.Collections.Concurrent.TesseractExpansion">
+            <summary>
+            An Expansion calculator for the Tesseract.
+            An instance is called whenever more blocks are needed.
+            One could expand differently, depending on the current array size.
+            </summary>
+            <param name="allocatedSlots">The current AllocationSlots value.</param>
+            <returns>The desired new AllocatedSlots count.</returns>
+        </member>
+        <member name="T:System.Collections.Concurrent.TesseractGear">
+            <summary>
+            The allowed concurrent operations.
+            </summary>
+        </member>
+        <member name="F:System.Collections.Concurrent.TesseractGear.N">
+            <summary>
+            Concurrent gets, sets, Take(), expand Resize() and NotNullItems() are enabled,
+            but not Append/Remove or shrink Resize.
+            </summary>
+        </member>
+        <member name="F:System.Collections.Concurrent.TesseractGear.Straight">
+            <summary>
+            Concurrent Append(), Take(), gets and sets, expand Resize() and NotNullItems() are enabled.
+            MoveAppendIndex() is not allowed.
+            </summary>
+        </member>
+        <member name="F:System.Collections.Concurrent.TesseractGear.Reverse">
+            <summary>
+            Concurrent Take(), RemoveLast() gets, sets and expand Resize() are enabled.
+            MoveAppendIndex() is not allowed.
+            </summary>
+            <remarks>
+            Reading is allowed if less than AlloatedSlots, Writes must be less than AppendIndex.
+            </remarks>
+        </member>
+        <member name="F:System.Collections.Concurrent.TesseractGear.P">
+            <summary>
+            Shrink Resize() is allowed.
+            </summary>
+        </member>
+        <member name="T:System.HeapFragment">
+            <summary>
+            Represents a slice of a heap allocated buffer
+            </summary>
+        </member>
+        <member name="M:System.HeapFragment.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>Writes the bytes in data into the heap fragment.</summary>
+            <param name="data">The bytes to be written</param>
+            <param name="offset">The writing position in the fragment window.</param>
+            <param name="length">The amount of bytes to take from <c>data</c> (0-length).</param>
+            <returns>The new offset, i.e. <c>offset + length</c>.</returns>
+            <exception cref="T:System.ArgumentNullException">If data is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If offset and length are out of range.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.HeapFragment.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads bytes from a MMF starting at offset and reading as long as <c>destination</c> is not filled up. 
+            The writing starts at destOffset and ends either at destination.Length or at fragment.Length - offset.
+            </summary>
+            <param name="destination">The buffer where the MMF data goes to.</param>
+            <param name="offset">The reading starts at offset.</param>
+            <param name="destOffset">The writing starts at destOffset.</param>
+            <returns>The new reading position = offset + the read bytes notNullsCount.</returns>
+            <exception cref="T:System.ArgumentNullException">If destination is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">For offset and destOffset.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="P:System.HeapFragment.UseAccessChecks">
+            <summary>
+            Guards against accessing a disposed, closed or reset lane.
+            The default is true.
+            </summary>
+        </member>
+        <member name="M:System.HeapFragment.Span">
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.HeapFragment.op_Implicit(System.HeapFragment)~System.Memory{System.Byte}">
+            <summary>
+            Gets the fragment Memory. 
+            </summary>
+            <param name="f">The fragment.</param>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.HeapFragment.op_Implicit(System.HeapFragment)~System.ReadOnlyMemory{System.Byte}">
+            <summary>
+            Casts the fragment as ReadOnlyMemory of bytes. 
+            </summary>
+            <param name="f">The fragment.</param>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="T:System.HeapSlot">
+            <summary>
+            Represents a slice of managed memory. 
+            This object is not part of a MemoryLane and its lifetime does not affect other MemoryFragment instances.
+            </summary>
+        </member>
+        <member name="M:System.HeapSlot.#ctor(System.Byte[])">
+            <summary>
+            Creates a MemoryFragment from a managed array. 
+            Be aware that the buffer could potentially be mutated concurrently or 
+            unexpectedly nulled from outside. Consider using the length constructor.
+            </summary>
+            <param name="slot">The buffer is shared!</param>
+            <exception cref="T:System.ArgumentNullException"></exception>
+        </member>
+        <member name="M:System.HeapSlot.#ctor(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Creates a MemoryFragment from a managed array. 
+            Be aware that the buffer could potentially be mutated concurrently or 
+            unexpectedly nulled from outside. Consider using the length constructor.
+            </summary>
+            <param name="slot">The buffer</param>
+            <param name="from">The start index</param>
+            <param name="length">The number of bytes</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"></exception>
+            <exception cref="T:System.ArgumentNullException"></exception>
+        </member>
+        <member name="M:System.HeapSlot.#ctor(System.Int32)">
+            <summary>
+            Allocates a buffer on the managed heap.
+            </summary>
+            <param name="length">The buffer size in bytes</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"></exception>
+        </member>
+        <member name="M:System.HeapSlot.Span(System.Boolean)">
+            <summary>
+            Take a Span of the whole range.
+            </summary>
+            <param name="format">Zero the bytes</param>
+            <returns>The Span</returns>
+        </member>
+        <member name="M:System.HeapSlot.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Writes the bytes in data (0-length) to the slot starting at <c>offset</c> position.
+            </summary>
+            <param name="data">The source array.</param>
+            <param name="offset">The writing position in the heap slot.</param>
+            <param name="length">How many bytes from the source to take.</param>
+            <returns>The offset + length</returns>
+        </member>
+        <member name="M:System.HeapSlot.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads bytes from the slot starting at offset until  <c>destination</c> is full or there is no more data.
+            The writing in <c>destination</c> starts at destOffset.
+            </summary>
+            <param name="destination">The read data.</param>
+            <param name="offset">The position in source to begin reading from.</param>
+            <param name="destOffset">Index in destination where the copying will begin at. By default is 0.</param>
+            <returns>The total bytes read, i.e. the new offset.</returns>
+            <exception cref="T:System.ArgumentNullException">If destination is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">For offset and destOffset.</exception>
+        </member>
+        <member name="M:System.HeapSlot.Span">
+            <summary>
+            Makes a span over the whole slot.
+            </summary>
+            <returns>The span structure.</returns>
+        </member>
+        <member name="M:System.HeapSlot.op_Implicit(System.HeapSlot)~System.Memory{System.Byte}">
+            <summary>
+            Gets the fragment Memory. 
+            </summary>
+            <param name="ms">The slot.</param>
+        </member>
+        <member name="M:System.HeapSlot.op_Implicit(System.HeapSlot)~System.ReadOnlyMemory{System.Byte}">
+            <summary>
+            Casts the fragment as ReadOnlyMemory of bytes. 
+            </summary>
+            <param name="ms">The slot.</param>
+        </member>
+        <member name="P:System.HeapSlot.Length">
+            <summary>
+            The fragment length.
+            </summary>
+        </member>
+        <member name="T:System.MappedFragment">
+            <summary>
+            Represents a fragment of a memory mapped file.
+            </summary>
+        </member>
+        <member name="M:System.MappedFragment.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>Writes the bytes in data into the MMF.</summary>
+            <remarks>Note that the Read() and Write() methods are not synchronized with access trough Span().
+            Use either Read/Write or Span().</remarks>
+            <param name="data">The bytes to be written</param>
+            <param name="offset">The number of written bytes so far.</param>
+            <param name="length">The amount of bytes to take from data (takes from 0 to length).</param>
+            <returns>The total written bytes, i.e. offset + length.</returns>
+            <exception cref="T:System.ArgumentNullException">If data is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If offset and length are out of range.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MappedFragment.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads bytes from a MMF starting at offset and reading as long as <c>destination</c> is not filled up. 
+            The writing starts at destOffset and ends either at destination.Length or at fragment.Length - offset.
+            </summary>
+            <param name="destination">The buffer where the MMF data goes to.</param>
+            <param name="offset">The total read bytes so far.</param>
+            <param name="destOffset">Index in destination where the copying will begin at. By default is 0.</param>
+            <returns>The total bytes read from the MMF, i.e. the new offset.</returns>
+            <exception cref="T:System.ArgumentNullException">If destination is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">For offset and destOffset.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MappedFragment.Span">
+            <summary>
+            Creates a Span from a raw pointer which marks the beginning of the 
+            MemoryMappedViewAccessor window.
+            </summary>
+            <returns>A Span structure</returns>
+             <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MappedFragment.Dispose">
+            <summary>
+            Does not implement a finalizer because the resource is held by the lane.
+            </summary>
+        </member>
+        <member name="P:System.MappedFragment.UseAccessChecks">
+            <summary>
+            Guards against accessing a disposed, closed or reset lane.
+            The default is true.
+            </summary>
+        </member>
+        <member name="F:System.MappedFragment.StartIdx">
+            <summary>
+            The byte offset in the MMF where the fragment starts.
+            </summary>
+        </member>
+        <member name="F:System.MappedFragment.length">
+            <summary>
+            The length of the fragment. 
+            </summary>
+        </member>
+        <member name="T:System.MarshalLaneFragment">
+            <summary>
+            Represents a slice of a MemoryLane allocated via Marshal.AllocHGlobal
+            </summary>
+        </member>
+        <member name="M:System.MarshalLaneFragment.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Writes the bytes in data (0-length) to the underlying native memory region starting at <c>offset</c> position.
+            </summary>
+            <param name="data">The source array.</param>
+            <param name="offset">The writing position in the native fragment</param>
+            <param name="length">How many bytes from the source to take.</param>
+            <returns>The offset + length</returns>
+            <exception cref="T:System.ArgumentNullException">data</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">For offset and length.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle,
+            AttemptToAccessDisposedLane,
+            AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MarshalLaneFragment.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads bytes from native memory starting at offset (within the fragment region) and reads until 
+            <c>destination</c> is full or there is no more data.
+            The writing in <c>destination</c> starts at destOffset.
+            </summary>
+            <param name="destination">The read data.</param>
+            <param name="offset">The position in source to begin reading from.</param>
+            <param name="destOffset">Index in destination where the copying will begin at. By default is 0.</param>
+            <returns>The total bytes read, i.e. the new offset.</returns>
+            <exception cref="T:System.ArgumentNullException">If destination is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">For offset and destOffset.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle,
+            AttemptToAccessDisposedLane,
+            AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MarshalLaneFragment.Span">
+            <summary>
+            Creates a Span from a raw pointer marking the beginning of the fragment window.
+            </summary>
+            <returns>A Span structure</returns>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle,
+            AttemptToAccessDisposedLane,
+            AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MarshalLaneFragment.Dispose">
+            <summary>
+            Does not implement a finalizer because the resource is held by the lane.
+            </summary>
+        </member>
+        <member name="P:System.MarshalLaneFragment.UseAccessChecks">
+            <summary>
+            Guards against accessing a disposed, closed or reset lane.
+            The default is true.
+            </summary>
+        </member>
+        <member name="F:System.MarshalLaneFragment.StartIdx">
+            <summary>
+            The beginning position within the MarshalLane
+            </summary>
+        </member>
+        <member name="F:System.MarshalLaneFragment.length">
+            <summary>
+            The length of the fragment. 
+            </summary>
+        </member>
+        <member name="T:System.MarshalSlot">
+            <summary>
+            Represents a slice of unmanaged memory. 
+            This object is not part of a MemoryLane and its lifetime does not affect other MemoryFragment instances.
+            Use the MarshalSlot for large and/or long living data which would fragment the memory lanes 
+            with slow resets.
+            </summary>
+            <remarks>
+            Be careful not to mix the Read/Write accessors with Span() and the Store/Load/Reserve methods.
+            </remarks>
+        </member>
+        <member name="M:System.MarshalSlot.#ctor(System.Int32)">
+            <summary>
+            Allocates the requested amount of native memory space.
+            </summary>
+            <param name="length">The number of bytes.</param>
+        </member>
+        <member name="M:System.MarshalSlot.Span(System.Boolean)">
+            <summary>
+            Take a Span of the whole range.
+            </summary>
+            <param name="format">Zero the bytes</param>
+            <returns>The Span</returns>
+        </member>
+        <member name="M:System.MarshalSlot.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Writes the bytes in data (0-length) to the underlying native memory region starting at <c>offset</c> position.
+            </summary>
+            <param name="data">The source array.</param>
+            <param name="offset">The writing position in the native fragment</param>
+            <param name="length">How many bytes from the source to take.</param>
+            <returns>The offset + length</returns>
+        </member>
+        <member name="M:System.MarshalSlot.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads bytes from native memory starting at offset (within the fragment region) and reads until 
+            <c>destination</c> is full or there is no more data.
+            The writing in <c>destination</c> starts at destOffset.
+            </summary>
+            <param name="destination">The read data.</param>
+            <param name="offset">The position in source to begin reading from.</param>
+            <param name="destOffset">Index in destination where the copying will begin at. By default is 0.</param>
+            <returns>The total bytes read, i.e. the new offset.</returns>
+            <exception cref="T:System.ArgumentNullException">If destination is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">For offset and destOffset.</exception>
+        </member>
+        <member name="M:System.MarshalSlot.Store``1(``0)">
+            <summary>
+            Store an unmanaged structure which has no managed references. 
+            </summary>
+            <typeparam name="T">Unmanaged structure type</typeparam>
+            <param name="str">The value</param>
+            <returns></returns>
+        </member>
+        <member name="M:System.MarshalSlot.Reserve``1(System.MarshalSlot@)">
+            <summary>
+            Returns a pointer to a structure, allocated in unmanaged memory.
+            </summary>
+            <typeparam name="T">A ref-free type.</typeparam>
+            <param name="mps">The pointer holder.</param>
+            <returns></returns>
+        </member>
+        <member name="M:System.MarshalSlot.Load``1">
+            <summary>
+            Constructs previously stored unmanaged structure.
+            </summary>
+            <typeparam name="T">A reference free structure type</typeparam>
+            <returns>The initialized structure</returns>
+        </member>
+        <member name="M:System.MarshalSlot.Span">
+            <summary>
+            Makes a span over the whole fragment.
+            </summary>
+            <returns>The span structure.</returns>
+        </member>
+        <member name="M:System.MarshalSlot.Dispose">
+            <summary>
+            Does not implement a finalizer!
+            </summary>
+        </member>
+        <member name="P:System.MarshalSlot.Length">
+            <summary>
+            The fragment length.
+            </summary>
+        </member>
+        <member name="P:System.MemoryFragment.Item(System.Int32)">
+            <summary>
+            Gets or sets a byte at index.
+            </summary>
+            <param name="index">The index</param>
+            <returns>The value at index</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If index is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Byte,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Boolean,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Char,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Int16,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.UInt16,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Int32,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.UInt32,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Int64,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.UInt64,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Double,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Guid,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.DateTime,System.Int32)">
+            <summary>
+            Writes the value starting at idx.
+            </summary>
+            <param name="v">The value</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the value length in bytes. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Span{System.Byte},System.Int32)">
+            <summary>
+            Copies the span starting at idx.
+            </summary>
+            <param name="bytes">The span to be copied</param>
+            <param name="idx">The index in the fragment window.</param>
+            <returns>The new offset, i.e. idx + the span length. If fails returns -idx.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Byte@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Boolean@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Char@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Int16@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.UInt16@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Int32@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.UInt32@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Int64@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.UInt64@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Double@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Guid@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.DateTime@,System.Int32)">
+            <summary>
+            Reads the value starting at idx.
+            </summary>
+            <param name="v">The ref value to be updated.</param>
+            <param name="idx">Index in the fragment window.</param>
+            <returns>The updated position as idx + the value length.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">If idx is out of range</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks and the lane is closed or cycled.
+            Codes: AttemptToAccessWrongLaneCycle, AttemptToAccessClosedLane AttemptToAccessDisposedLane</exception>
+        </member>
+        <member name="M:System.MemoryFragment.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>Writes the bytes in data into the fragment storage.</summary>
+            <param name="data">The bytes to be written</param>
+            <param name="offset">The writing position in the fragment window.</param>
+            <param name="length">The amount of bytes to take from <c>data</c> (0-length).</param>
+            <returns>The new offset, i.e. <c>offset + length</c>.</returns>
+            <exception cref="T:System.ArgumentNullException">If data is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If offset and length are out of range.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MemoryFragment.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads bytes from the fragment storage starting at offset and reading as long as <c>destination</c> is not filled up. 
+            The writing starts at destOffset and ends either at destination.Length or at fragment.Length - offset.
+            </summary>
+            <param name="destination">The read buffer.</param>
+            <param name="offset">The reading starts at offset.</param>
+            <param name="destOffset">The writing starts at destOffset.</param>
+            <returns>The new reading position = offset + the read bytes notNullsCount.</returns>
+            <exception cref="T:System.ArgumentNullException">If destination is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">For offset and destOffset.</exception>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="P:System.MemoryFragment.Type">
+            <summary>
+            The fragment memory type.
+            </summary>
+        </member>
+        <member name="M:System.MemoryFragment.ToSpan``1">
+            <summary>
+            Casts the fragment bytes as a span of T
+            </summary>
+            <typeparam name="T">The casting struct</typeparam>
+            <returns>A span of structs</returns>
+        </member>
+        <member name="M:System.MemoryFragment.CreateStream">
+            <summary>
+            Creates a stream with the fragment as a storage.
+            </summary>
+            <returns>The fragment stream</returns>
+        </member>
+        <member name="M:System.MemoryFragment.ToArray">
+            <summary>
+            Creates new byte array and copies the data into it.
+            </summary>
+            <returns></returns>
+        </member>
+        <member name="F:System.MemoryFragment.useAccessChecks">
+            <summary>
+            If true checks whether the lane is closed, disposed or the cycle has not changed.
+            Derived classes may expose it as public, by default is true.
+            </summary>
+        </member>
+        <member name="M:System.MemoryFragment.op_Implicit(System.MemoryFragment)~System.Span{System.Byte}">
+            <summary>
+            Gets the fragment Span. 
+            </summary>
+            <param name="f">The fragment.</param>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="M:System.MemoryFragment.op_Implicit(System.MemoryFragment)~System.ReadOnlySpan{System.Byte}">
+            <summary>
+            Casts the fragment as ReadOnlySpan of bytes. 
+            </summary>
+            <param name="f">The fragment.</param>
+            <exception cref="T:System.MemoryLaneException">If UseAccessChecks is on: 
+            AttemptToAccessWrongLaneCycle, AttemptToAccessDisposedLane, AttemptToAccessClosedLane
+            </exception>
+        </member>
+        <member name="F:System.HighwaySettings.OnMaxLaneReached">
+            <summary>
+            Will be invoked if the MaxLanesCount threshold is reached.
+            The MemoryCarriage would expect a boolean response indicating whether to swallow the 
+            exception and return null as fragment or throw MemoryLaneException with code MaxLanesCountReached.
+            </summary>
+            <exception cref="T:System.MemoryLaneException">Code.MaxLanesCountReached</exception>
+        </member>
+        <member name="F:System.HighwaySettings.OnMaxTotalBytesReached">
+            <summary>
+            A handler for the case of allocating more than MaxTotalAllocatedBytes in all lanes.
+            Pass true in order to suppress the exception and just receive null as fragment.
+            </summary>
+            <exception cref="T:System.MemoryLaneException">Code.MaxTotalAllocBytesReached</exception>
+        </member>
+        <member name="F:System.HighwaySettings.NextCapacity">
+            <summary>
+            If set, the function may specify different than the default capacity based on 
+            the current number of lanes. By default always returns the DefaultCapacity value.
+            </summary>
+        </member>
+        <member name="P:System.HighwaySettings.DefaultLaneCapacity">
+            <summary>
+            If not provided in the ctor this value will be used when allocating
+            new lanes in the highway. 
+            The default value is 8M.
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.LapsBeforeNewLane">
+            <summary>
+            Controls how many full cycles around all lanes should be made before creating a new lane.
+            The default value is 2.
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.LaneAllocTries">
+            <summary>
+            The number of allocation attempts before trying another lane.
+            It is roughly the number of competing threads, default is (4).
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.ConcurrentNewLaneAllocations">
+            <summary>
+            When out of space this number of new lanes could be created simultaneously.
+            The default value is 1, i.e. all Alloc() executions will block until the new
+            lane is created, which may fail if the settings limits are reached.
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.NewLaneAllocationTimeoutMS">
+            <summary>
+            The amount of time the Alloc() method will wait for new lane before bailing.
+            The default value is 3s.
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.DefaultCapacity">
+            <summary>
+            If the allocator fail to find a free slice in any lane, 
+            a new one will be created with DefaultCapacity bytes in length.
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.MaxLanesCount">
+            <summary>
+            Can be used with the OnMaxLaneReached handler as an alerting mechanism.
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.MaxTotalAllocatedBytes">
+            <summary>
+            This is the aggregated capacity in all lanes, not the actual active fragments.
+            </summary>
+        </member>
+        <member name="F:System.HighwaySettings.RegisterForProcessExitCleanup">
+            <summary>
+            Will trigger a Dispose() before process exits. True by default.
+            </summary>
+        </member>
+        <member name="T:System.HeapHighway">
+            <summary>
+            Allocates memory lanes on the large object heap (if the length is > 80K).
+            </summary>
+        </member>
+        <member name="M:System.HeapHighway.#ctor">
+            <summary>
+            Creates a 2 lane highway with lengths 8MB and 4MB
+            </summary>
+        </member>
+        <member name="M:System.HeapHighway.#ctor(System.Int32[])">
+            <summary>
+            Creates new lanes with the specified lengths and a default HighwaySettings instance.
+            </summary>
+            <param name="lanes">The initial layout.</param>
+        </member>
+        <member name="M:System.HeapHighway.#ctor(System.HighwaySettings,System.Int32[])">
+            <summary>
+            Creates new lanes with the specified lengths and settings.
+            When needed, the MemoryCarriage will create the new lanes with settings.DefaultCapacity in length.
+            </summary>
+            <param name="stg">Generic settings for all MemoryCarriage derivatives.</param>
+            <param name="lanes">The initial setup.</param>
+        </member>
+        <member name="F:System.HeapHighway.DEF_HEAP_LANES">
+            <summary>
+            Update before calling the default ctor.
+            </summary>
+        </member>
+        <member name="T:System.IMemoryHighway">
+            <summary>
+            A MemoryCarriage contract
+            </summary>
+        </member>
+        <member name="M:System.IMemoryHighway.AllocFragment(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Allocates a memory fragment on any of the existing lanes or on a new one.
+            </summary>
+            <remarks>
+            Use HighwaySettings.LapsBeforeNewLane to control how many cycles around all 
+            lanes should be made before allocating a new one.
+            </remarks>
+            <param name="size">The desired buffer length.</param>
+            <param name="tries">The number of fails before switching to another lane. 
+            If 0, the HighwaySettings.LaneAllocTries is used. </param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>A new fragment.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">
+            If size is negative or greater than HighwaySettings.MAX_LANE_CAPACITY.
+            </exception>
+            <exception cref="T:System.MemoryLaneException">
+            Code.NotInitialized: when the lanes are not initialized.
+            Code.NewLaneAllocFail: after an unsuccessful attempt to allocate a fragment in a dedicated new lane.
+            One should never see this one!
+            </exception>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="P:System.IMemoryHighway.Item(System.Int32)">
+            <summary>
+            Gets a specific lane.
+            </summary>
+            <param name="index">The index must be less than the LastLaneIndex value. </param>
+            <returns>The Lane</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.IMemoryHighway.GetLanes">
+            <summary>
+            Creates a new List instance with the selection of all non null cells in the underlying array.
+            </summary>
+            <returns>A read only list of MemoryLane objects.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.IMemoryHighway.CreateStream(System.Int32)">
+            <summary>
+            Creates a HighwayStream from the current highway,
+            </summary>
+            <param name="fragmentSize">The incremental memory size.</param>
+            <returns>The Stream.</returns>
+        </member>
+        <member name="M:System.IMemoryHighway.ReopenLane(System.Int32)">
+            <summary>
+            Creates a lane at specific slot with the size given by the settings NextCapacity callback.
+            The slot must be null or Disposed.
+            </summary>
+            <param name="index">The index of the lane in the highway.</param>
+            <returns>The newly created lane instance or null if fails.</returns>
+        </member>
+        <member name="M:System.IMemoryHighway.DisposeLane(System.Int32)">
+            <summary>
+            Disposes a lane at index. This nulls the slot which 
+            will be counted if the lane is disposed directly.
+            The disposed but not nulled lanes may blow the MAX_LANES threshold at allocation.
+            </summary>
+            <param name="index">The slot index.</param>
+        </member>
+        <member name="M:System.IMemoryHighway.GetTotalActiveFragments">
+            <summary>
+            Returns an aggregate of all active fragments in all lanes.
+            </summary>
+            <returns>The number of active fragments</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.IMemoryHighway.GetTotalCapacity">
+            <summary>
+            Sums the lengths of all lanes.
+            </summary>
+            <returns>The total preallocated space for the highway.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.IMemoryHighway.GetTotalFreeSpace">
+            <summary>
+            Sums the free space in all lanes.
+            </summary>
+            <returns>The total bytes left.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.IMemoryHighway.GetLanesCount">
+            <summary>
+            Gets the Lanes notNullsCount.
+            </summary>
+            <returns>The number of preallocated lanes.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.IMemoryHighway.GetLastLaneIndex">
+            <summary>
+            Returns the array.AppendIndex value, i.e. the furthest index in the Lanes array.
+            </summary>
+            <returns>The number of preallocated lanes.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="P:System.IMemoryHighway.LastAllocTickAnyLane">
+            <summary>
+            The last allocation time. 
+            </summary>
+        </member>
+        <member name="P:System.IMemoryHighway.IsDisposed">
+            <summary>
+            If true all public methods throw ObjectDisposedException
+            </summary>
+        </member>
+        <member name="P:System.IMemoryHighway.Type">
+            <summary>
+            When overridden returns the highway storage type.
+            </summary>
+        </member>
+        <member name="M:System.IMemoryHighway.FullTrace">
+            <summary>
+            Prints all lanes' status.
+            </summary>
+            <returns>An info string.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="T:System.MappedHighway">
+            <summary>
+            Allocates memory lanes as memory mapped files - one lane is one file.
+            </summary>
+        </member>
+        <member name="M:System.MappedHighway.#ctor">
+            <summary>
+            Creates a 2 lane highway with lengths 8MB and 4MB
+            </summary>
+        </member>
+        <member name="M:System.MappedHighway.#ctor(System.Int32[])">
+            <summary>
+            Creates new lanes with the specified lengths and a default HighwaySettings instance.
+            Note that every lane is one memory mapped file.
+            </summary>
+            <param name="lanes">The initial layout.</param>
+        </member>
+        <member name="M:System.MappedHighway.#ctor(System.HighwaySettings,System.Int32[])">
+            <summary>
+            Creates new lanes with the specified lengths and settings.
+            When needed, the MemoryCarriage will create the new lanes with settings.DefaultCapacity in length.
+            Note that every lane is a separate memory mapped file.
+            </summary>
+            <param name="stg">Generic settings for all MemoryCarriage derivatives.</param>
+            <param name="lanes">The initial setup.</param>
+        </member>
+        <member name="F:System.MappedHighway.DEF_MMF_LANES">
+            <summary>
+            Update before calling the default ctor.
+            </summary>
+        </member>
+        <member name="T:System.MarshalHighway">
+            <summary>
+            Allocates memory lanes via Marshal.AllocHGlobal
+            </summary>
+        </member>
+        <member name="M:System.MarshalHighway.#ctor">
+            <summary>
+            Creates a 2 lane highway with lengths 8MB and 4MB
+            </summary>
+        </member>
+        <member name="M:System.MarshalHighway.#ctor(System.Int32[])">
+            <summary>
+            Creates new lanes with the specified lengths and a default HighwaySettings instance.
+            </summary>
+            <param name="lanes">The initial layout.</param>
+        </member>
+        <member name="M:System.MarshalHighway.#ctor(System.HighwaySettings,System.Int32[])">
+            <summary>
+            Creates new lanes with the specified lengths and settings.
+            When needed, the MemoryCarriage will create the new lanes with settings.DefaultCapacity in length.
+            </summary>
+            <param name="stg">Generic settings for all MemoryCarriage derivatives.</param>
+            <param name="lanes">The initial setup.</param>
+        </member>
+        <member name="F:System.MarshalHighway.DEF_NHEAP_LANES">
+            <summary>
+            Update before calling the default ctor.
+            </summary>
+        </member>
+        <member name="T:System.VirtualHighway">
+            <summary>
+            AllocFragment() produces either HeapSlot or MarshalSlot instances.
+            There are no lanes hence no need to be disposed.
+            </summary>
+        </member>
+        <member name="M:System.VirtualHighway.#ctor(System.Boolean)">
+            <summary>
+            If allocateNativeHeapSlots is true will allocate fragments on the native heap,
+            otherwise on the managed heap.
+            </summary>
+            <param name="allocateNativeHeapSlots">False by default</param>
+        </member>
+        <member name="P:System.VirtualHighway.Item(System.Int32)">
+            <returns>Null</returns>
+        </member>
+        <member name="P:System.VirtualHighway.LastAllocTickAnyLane">
+            <summary>
+            Returns 0
+            </summary>
+        </member>
+        <member name="P:System.VirtualHighway.IsDisposed">
+            <summary>
+            Returns false.
+            </summary>
+        </member>
+        <member name="M:System.VirtualHighway.AllocFragment(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Only the size argument is used.
+            </summary>
+            <param name="size">The size in bytes.</param>
+            <param name="tries">Ignored</param>
+            <param name="awaitMS">Ignored</param>
+            <returns>Either a HeapSlot or a MarshalSlot</returns>
+        </member>
+        <member name="M:System.VirtualHighway.CreateStream(System.Int32)">
+            <summary>
+            Creates a HighwayStream
+            </summary>
+        </member>
+        <member name="M:System.VirtualHighway.Dispose">
+            <summary>
+            Does nothing.
+            </summary>
+        </member>
+        <member name="M:System.VirtualHighway.DisposeLane(System.Int32)">
+            <summary>
+            Does nothing.
+            </summary>
+        </member>
+        <member name="M:System.VirtualHighway.FullTrace">
+            <summary>
+            Returns an empty string.
+            </summary>
+        </member>
+        <member name="M:System.VirtualHighway.GetLanes">
+            <returns>NUll</returns>
+        </member>
+        <member name="M:System.VirtualHighway.GetLanesCount">
+            <returns>0</returns>
+        </member>
+        <member name="M:System.VirtualHighway.GetLastLaneIndex">
+            <returns>0</returns>
+        </member>
+        <member name="M:System.VirtualHighway.GetTotalActiveFragments">
+            <returns>0</returns>
+        </member>
+        <member name="M:System.VirtualHighway.GetTotalCapacity">
+            <returns>0</returns>
+        </member>
+        <member name="M:System.VirtualHighway.GetTotalFreeSpace">
+            <returns>0</returns>
+        </member>
+        <member name="M:System.VirtualHighway.ReopenLane(System.Int32)">
+            <returns>Null</returns>
+        </member>
+        <member name="T:System.HeapLane">
+            <summary>
+            A memory lane backed by the managed heap.
+            </summary>
+        </member>
+        <member name="M:System.HeapLane.#ctor(System.Int32)">
+            <summary>
+            Creates a lane with the specified capacity.
+            </summary>
+            <param name="capacity">The amount of bytes to allocate.</param>
+        </member>
+        <member name="M:System.HeapLane.AllocHeapFragment(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Tries to block the size amount of bytes on the remaining lane space.
+            </summary>
+            <param name="size">The number of bytes.</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>Null if fails.</returns>
+        </member>
+        <member name="M:System.HeapLane.Alloc(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Calls AllocHeapFragment with the given arguments.
+            </summary>
+            <param name="size">The desired size.</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>Null if fails.</returns>
+        </member>
+        <member name="M:System.HeapLane.Dispose">
+            <summary>
+            Nulls the lane.
+            </summary>
+        </member>
+        <member name="P:System.HeapLane.LaneCapacity">
+            <summary>
+            Returns zero if the lane is null.
+            </summary>
+        </member>
+        <member name="T:System.MappedLane">
+            <summary>
+            A memory lane backed by a memory mapped file. 
+            </summary>
+        </member>
+        <member name="M:System.MappedLane.#ctor(System.Int32)">
+            <summary>
+            Creates a new lane with FragmentDispose mode.
+            </summary>
+            <param name="capacity">The lane length.</param>
+        </member>
+        <member name="M:System.MappedLane.#ctor(System.Int32,System.String)">
+            <summary>
+            Creates a new lane.
+            </summary>
+            <param name="capacity">The length in bytes.</param>
+            <param name="filename">If not provided it's auto generated as MMF-#KB-ID</param>
+            <param name="dm">Toggle lost fragments tracking</param>
+        </member>
+        <member name="M:System.MappedLane.AllocMappedFragment(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Tries to allocate the desired amount of bytes on the remaining lane space.
+            </summary>
+            <param name="size">The length in bytes.</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>Null if fails.</returns>
+        </member>
+        <member name="M:System.MappedLane.Alloc(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Calls AllocMappedFragment() with the given args.
+            </summary>
+            <param name="size">The length in bytes</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>A casted MappedFragment if succeeds, null if fails.</returns>
+        </member>
+        <member name="M:System.MappedLane.Dispose">
+            <summary>
+            Deletes the mapped file.
+            </summary>
+        </member>
+        <member name="M:System.MappedLane.Finalize">
+            <summary>
+            The mapped lane uses a finalizer to delete the file
+            in case it's not properly disposed.
+            </summary>
+        </member>
+        <member name="P:System.MappedLane.LaneCapacity">
+            <summary>
+            The capacity set in the ctor.
+            </summary>
+        </member>
+        <member name="F:System.MappedLane.FileID">
+            <summary>
+            The memory mapped file name.
+            </summary>
+        </member>
+        <member name="T:System.MarshalLane">
+            <summary>
+            A memory lane using the unmanaged process heap.
+            </summary>
+        </member>
+        <member name="M:System.MarshalLane.#ctor(System.Int32)">
+            <summary>
+            Creates the lane with the desired capacity.
+            This method allocates so expect OutOfMemoryException.
+            </summary>
+            <param name="capacity">The number of bytes.</param>
+            <exception cref="T:System.OutOfMemoryException">Guess what.</exception>
+        </member>
+        <member name="M:System.MarshalLane.AllocMarshalFragment(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Blocks a fragment of the lane.
+            </summary>
+            <param name="size">Number of bytes.</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>A MarshalLaneFragment or null.</returns>
+        </member>
+        <member name="M:System.MarshalLane.Alloc(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Calls AllocMarshalFragment() with the same args.
+            </summary>
+            <returns>Null if fails.</returns>
+        </member>
+        <member name="M:System.MarshalLane.Dispose">
+            <summary>
+            Frees the native memory.
+            </summary>
+        </member>
+        <member name="M:System.MarshalLane.Finalize">
+            <summary>
+            This lane uses a finalizer to cleanup the native memory
+            in case the object is not manually disposed and is GCed.
+            This is very leaky!
+            </summary>
+        </member>
+        <member name="P:System.MarshalLane.LaneCapacity">
+            <summary>
+            The total allocated space.
+            </summary>
+        </member>
+        <member name="T:System.MemoryLane">
+            <summary>
+            A reusable memory storage with incremental allocation and ref-counted disposing behavior.
+            Uses MemoryFragment objects for access to the allocated blocks.
+            </summary>
+        </member>
+        <member name="M:System.MemoryLane.#ctor(System.Int32)">
+            <summary>
+            Creates a lane with the provided capacity and disposal mode.
+            </summary>
+            <param name="capacity">The number of bytes.</param>
+            <param name="rm">FragmentDispose</param>
+        </member>
+        <member name="M:System.MemoryLane.Alloc(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Creates a new memory fragment if there is enough space on the lane.
+            </summary>
+            <remarks>
+            Calling Alloc directly on the lane competes with other potential highway calls.
+            </remarks>
+            <param name="size">The requested length.</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>Null if fails.</returns>
+        </member>
+        <member name="M:System.MemoryLane.Alloc(System.Int32,System.FragmentRange@,System.Int32,System.Int32)">
+            <summary>
+            Attempts to allocate a fragment range in the remaining lane space.
+            </summary>
+            <param name="size">The requested length.</param>
+            <param name="frag">A data bag.</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>True if the space was successfully taken.</returns>
+        </member>
+        <member name="M:System.MemoryLane.Force(System.Boolean,System.Boolean)">
+            <summary>
+            Resets the Offset and Allocations, closes the lane (optional) and increments the LaneCycle.
+            </summary>
+            <remarks>
+            Resetting the offset may lead to unpredictable behavior if you attempt to read or write
+            with any active fragments. The MemoryFragment's Read/Write and Span() methods assert the 
+            correctness of the lane cycle, but one may already have a Span for the previous cycle,
+            and using it will override the lane on write and yield corrupt data on read.
+            </remarks>
+            <param name="close">True to close the lane.</param>
+            <param name="reset">True to reset the offset and the allocations to 0.</param>
+        </member>
+        <member name="M:System.MemoryLane.Format(System.IO.Stream,System.Int32)">
+            <summary>
+            Writes count bytes from source into the lane space. The lane is forced to Offset 0 and is closed.
+            If fails the lane remains closed.
+            </summary>
+            <remarks>This method is synchronized, but not protected from concurrent Force() calls.
+            </remarks>
+            <param name="source">The source stream.</param>
+            <param name="count">Number of bytes to copy from source.</param>
+            <returns>The copied bytes count.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">The count is less than 1 or greater than LaneCapacity</exception>
+        </member>
+        <member name="M:System.MemoryLane.GetAllBytes">
+            <summary>
+            For diagnostics.
+            </summary>
+        </member>
+        <member name="M:System.MemoryLane.FullTrace">
+            <summary>
+            Traces the Allocations, LaneCycle, Capacity, Offset, LasrtAllocTick and IsClosed properties.
+            </summary>
+            <returns>A formatted string: [offset/cap #allocations C:LaneCycle T:lastAllocTick on/off]</returns>
+        </member>
+        <member name="P:System.MemoryLane.LaneCapacity">
+            <summary>
+            The lane capacity in bytes.
+            </summary>
+        </member>
+        <member name="P:System.MemoryLane.Offset">
+            <summary>
+            The lane offset index.
+            </summary>
+        </member>
+        <member name="P:System.MemoryLane.Allocations">
+            <summary>
+            The number of allocations so far. Resets to zero on a new cycle.
+            </summary>
+        </member>
+        <member name="P:System.MemoryLane.LastAllocTick">
+            <summary>
+            The last allocation timer tick.
+            </summary>
+        </member>
+        <member name="P:System.MemoryLane.IsClosed">
+            <summary>
+            If the lane is closed. This is flag is not related with IsDisposed.
+            </summary>
+        </member>
+        <member name="P:System.MemoryLane.LaneCycle">
+            <summary>
+            The current lane cycle, i.e. number of resets.
+            </summary>
+        </member>
+        <member name="P:System.MemoryLane.IsDisposed">
+            <summary>
+            If true the underlying memory storage is released.
+            </summary>
+        </member>
+        <member name="T:System.MemoryCarriage`2">
+            <summary>
+            The allocation/release behavior is generalized here.
+            </summary>
+            <typeparam name="L">A Lane</typeparam>
+            <typeparam name="F">The corresponding fragment type</typeparam>
+        </member>
+        <member name="M:System.MemoryCarriage`2.Create(System.Int32)">
+            <summary>
+            Creates new lanes with the default capacity from the HighwaySettings. 
+            </summary>
+            <param name="count">Number of lanes to create.</param>
+            <exception cref="T:System.MemoryLaneException">
+            Code.MaxLanesCountReached: when the MaxLanesCountReached threshold in settings is reached AND
+            the OnMaxLaneReached handler is either null or returns false
+            Code.MaxTotalAllocBytesReached: when the total lanes capacity is greater than MaxTotalAllocatedBytes AND
+            the OnMaxTotalBytesReached handler is either null or returns false, meaning "do not ignore".
+            Code.SizeOutOfRange: when at least one of the lengths is outside the 
+            HighwaySettings.MIN_LANE_CAPACITY - HighwaySettings.MAX_LANE_CAPACITY interval.
+            </exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If notNullsCount is outside the 1-HighwaySettings.MAX_LANE_COUNT interval </exception>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.Create(System.Int32[])">
+            <summary>
+            Creates new lanes with specific capacities. 
+            </summary>
+            <param name="laneSizes">Lanes by length.</param>
+            <exception cref="T:System.MemoryLaneException">
+            Code.MaxLanesCountReached: when the MaxLanesCountReached threshold in settings is reached AND
+            the OnMaxLaneReached handler is either null or returns false
+            Code.MaxTotalAllocBytesReached: when the total lanes capacity is greater than MaxTotalAllocatedBytes AND
+            the OnMaxTotalBytesReached handler is either null or returns false, meaning "do not ignore".
+            Code.SizeOutOfRange: when at least one of the lengths is outside the 
+            HighwaySettings.MIN_LANE_CAPACITY - HighwaySettings.MAX_LANE_CAPACITY interval.
+            </exception>
+            <exception cref="T:System.ArgumentNullException">When the laneSizes is either null or has zero items.</exception>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.Alloc(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Allocates a generic fragment with a specified length.
+            </summary>
+            <param name="size">The number of bytes to allocate.</param>
+            <param name="tries">
+            The number of fails before switching to another lane. 
+            If 0 the HighwaySettings.LaneAllocTries value is used.
+            </param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>A new fragment.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">
+            If size is negative or greater than HighwaySettings.MAX_LANE_CAPACITY.
+            </exception>
+            <exception cref="T:System.MemoryLaneException">
+            Code.NotInitialized: when the lanes are not initialized.
+            Code.NewLaneAllocFail: after an unsuccessful attempt to allocate a fragment in a dedicated new lane.
+            One should never see this one!
+            </exception>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.AllocFragment(System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Allocates a memory fragment on any of the existing lanes or on a new one.
+            </summary>
+            <param name="size">The desired buffer length.</param>
+            <param name="tries">The number of fails before switching to another lane.</param>
+            <param name="awaitMS">The awaitMS for each try</param>
+            <returns>A new fragment.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException">
+            If size is negative or greater than HighwaySettings.MAX_LANE_CAPACITY.
+            </exception>
+            <exception cref="T:System.MemoryLaneException">
+            Code.NotInitialized: when the lanes are not initialized.
+            Code.NewLaneAllocFail: after an unsuccessful attempt to allocate a fragment in a dedicated new lane.
+            One should never see this one!
+            </exception>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.Dispose">
+            <summary>
+            Calls Dispose to all lanes individually and switches the IsDisposed flag to true,
+            All methods will throw ObjectDisposedException after that.
+            </summary>
+        </member>
+        <member name="M:System.MemoryCarriage`2.GetTotalActiveFragments">
+            <summary>
+            Returns an aggregate of all active fragments in all lanes.
+            </summary>
+            <returns>The number of active fragments</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.GetTotalCapacity">
+            <summary>
+            Sums the lengths of all lanes.
+            </summary>
+            <returns>The total preallocated space for the highway.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.GetTotalFreeSpace">
+            <summary>
+            Sums the free space in all lanes.
+            </summary>
+            <returns>The total bytes left.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.GetLanesCount">
+            <summary>
+            Gets the Lanes notNullsCount.
+            </summary>
+            <returns>The number of preallocated lanes.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.GetLastLaneIndex">
+            <summary>
+            Returns the array.AppendIndex value, i.e. the furthest index in the Lanes array.
+            </summary>
+            <returns>The number of preallocated lanes.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.GetLanes">
+            <summary>
+            Creates a new List instance with the selection of all non null cells in the underlying array.
+            This is a relatively expensive operation, depending on the array length and the AppendIndex value, so
+            one may consider using the indexer instead.
+            </summary>
+            <returns>A read only list of MemoryLane objects.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.ReopenLane(System.Int32)">
+            <summary>
+            Creates a lane at specific slot with the size given by the settings NextCapacity callback.
+            The slot must be null or Disposed.
+            </summary>
+            <param name="index">The index of the lane in the highway.</param>
+            <returns>The newly created lane instance or null if fails.</returns>
+            <exception cref="T:System.MemoryLaneException">Thresholds are reached: 
+            MaxLanesCountReached or MaxTotalAllocBytesReached</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.DisposeLane(System.Int32)">
+            <summary>
+            Disposes a lane at index. This nulls the slot which 
+            will be counted if the lane is disposed directly.
+            The disposed but not nulled lanes may blow the MAX_LANES threshold at allocation.
+            </summary>
+            <param name="index">The slot index.</param>
+        </member>
+        <member name="P:System.MemoryCarriage`2.Item(System.Int32)">
+            <summary>
+            Gets a specific lane.
+            </summary>
+            <param name="index">The index must be less than the LastLaneIndex value. </param>
+            <returns>The Lane</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If the index is out of bounds.</exception>
+        </member>
+        <member name="P:System.MemoryCarriage`2.Type">
+            <summary>
+            When overridden returns the highway storage type.
+            </summary>
+        </member>
+        <member name="P:System.MemoryCarriage`2.IsDisposed">
+            <summary>
+            True if the Highway is disposed.
+            </summary>
+        </member>
+        <member name="P:System.MemoryCarriage`2.System#IMemoryHighway#Item(System.Int32)">
+            <summary>
+            Get a lane by index.
+            </summary>
+            <param name="index">The lane index.</param>
+            <returns>A memory lane.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If the index is out of bounds.</exception>
+        </member>
+        <member name="M:System.MemoryCarriage`2.CreateStream(System.Int32)">
+            <summary>
+            Creates a HighwayStream from the current highway,
+            </summary>
+            <param name="fragmentSize">The incremental memory size.</param>
+            <returns>The Stream.</returns>
+        </member>
+        <member name="M:System.MemoryCarriage`2.FullTrace">
+            <summary>
+            Prints all lanes status.
+            </summary>
+            <returns>An info string.</returns>
+            <exception cref="T:System.ObjectDisposedException">If the MemoryCarriage is disposed.</exception>
+        </member>
+        <member name="P:System.MemoryCarriage`2.LastAllocTickAnyLane">
+            <summary>
+            The last allocation time. 
+            </summary>
+        </member>
+        <member name="T:System.StorageType">
+            <summary>
+            Types of memory storage.
+            </summary>
+        </member>
+        <member name="T:System.IO.FragmentStream">
+            <summary>
+            A stream object with a fragment as a memory storage.
+            </summary>
+        </member>
+        <member name="M:System.IO.FragmentStream.#ctor(System.MemoryFragment)">
+            <summary>
+            Creates a stream objects.
+            </summary>
+            <param name="frag"></param>
+            <exception cref="T:System.ArgumentNullException">If frag is null.</exception>
+            <exception cref="T:System.ObjectDisposedException">If the fragment is disposed.</exception>
+        </member>
+        <member name="P:System.IO.FragmentStream.CanRead">
+            <summary>
+            True.
+            </summary>
+        </member>
+        <member name="P:System.IO.FragmentStream.CanSeek">
+            <summary>
+            True.
+            </summary>
+        </member>
+        <member name="P:System.IO.FragmentStream.CanWrite">
+            <summary>
+            True.
+            </summary>
+        </member>
+        <member name="P:System.IO.FragmentStream.Length">
+            <summary>
+            The current length.
+            </summary>
+        </member>
+        <member name="P:System.IO.FragmentStream.Position">
+            <summary>
+            Get set the position.
+            </summary>
+        </member>
+        <member name="M:System.IO.FragmentStream.Flush">
+            <summary>
+            Does nothing.
+            </summary>
+        </member>
+        <member name="M:System.IO.FragmentStream.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            The standard stream Read. 
+            The count could be cut twice: 
+            First to buffer.Length - offset if the buffer slice from offset is smaller than count.
+            Second to stream's Length - Position if count reaches beyond the capacity.
+            </summary>
+            <param name="buffer">Where to write.</param>
+            <param name="offset">Start index in buffer.</param>
+            <param name="count">Number of bytes to read.</param>
+            <returns>The number of read bytes.</returns>
+            <exception cref="T:System.ArgumentNullException">If buffer is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If offset or count are negative.</exception>
+        </member>
+        <member name="M:System.IO.FragmentStream.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Writes the buffer slice from offset to offset + count into the stream.
+            Unlike Read doesn't cut the count but throws because it's void.
+            </summary>
+            <param name="buffer">The source bytes.</param>
+            <param name="offset">Starting index in buffer.</param>
+            <param name="count">Number of bytes to take.</param>
+            <exception cref="T:System.ArgumentNullException">If buffer is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">
+            If offset or count are negative or count reaches beyond the fragment capacity.</exception>
+            <exception cref="T:System.ArgumentException">If the buffer slice from offset is smaller than count.</exception>
+        </member>
+        <member name="M:System.IO.FragmentStream.Seek(System.Int64,System.IO.SeekOrigin)">
+            <summary>
+            Moves the current position.
+            </summary>
+            <param name="offset">Number of bytes.</param>
+            <param name="origin">Use negative numbers with SeekOrigin.End</param>
+            <returns>The Position value.</returns>
+        </member>
+        <member name="M:System.IO.FragmentStream.SetLength(System.Int64)">
+            <summary>
+            Will shrink the stream length, but not the fragment.
+            </summary>
+            <param name="value"></param>
+        </member>
+        <member name="M:System.IO.FragmentStream.ReadByte">
+            <summary>
+            Reads the byte at Position and advances one slot
+            </summary>
+            <returns>The byte as int</returns>
+        </member>
+        <member name="M:System.IO.FragmentStream.WriteByte(System.Byte)">
+            <summary>
+            Writes the value at Position and advances one slot
+            </summary>
+            <param name="value">The byte</param>
+        </member>
+        <member name="T:System.IO.HighwayStream">
+            <summary>
+            A stream with a MemoryHighway for storage.
+            </summary>
+        </member>
+        <member name="M:System.IO.HighwayStream.#ctor(System.IMemoryHighway,System.Int32)">
+            <summary>
+            Creates a new Highway stream instance.
+            </summary>
+            <param name="hw">The highway to use for storage.</param>
+            <param name="fragmentSize">The size of the fragments.</param>
+        </member>
+        <member name="P:System.IO.HighwayStream.CanRead">
+            <summary>
+            True.
+            </summary>
+        </member>
+        <member name="P:System.IO.HighwayStream.CanSeek">
+            <summary>
+            True.
+            </summary>
+        </member>
+        <member name="P:System.IO.HighwayStream.CanWrite">
+            <summary>
+            True.
+            </summary>
+        </member>
+        <member name="P:System.IO.HighwayStream.Length">
+            <summary>
+            The current length.
+            </summary>
+        </member>
+        <member name="P:System.IO.HighwayStream.Position">
+            <summary>
+            Get set the position.
+            </summary>
+        </member>
+        <member name="M:System.IO.HighwayStream.Flush">
+            <summary>
+            Does nothing.
+            </summary>
+        </member>
+        <member name="M:System.IO.HighwayStream.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            The standard stream Read. 
+            The count could be cut twice: 
+            First to buffer.Length - offset if the buffer slice from offset is smaller than count.
+            Second to stream's Length - Position if count reaches beyond the capacity.
+            </summary>
+            <param name="buffer">Where to write.</param>
+            <param name="offset">Start index in buffer.</param>
+            <param name="count">Number of bytes to read.</param>
+            <returns>The number of read bytes.</returns>
+            <exception cref="T:System.ArgumentNullException">If buffer is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">If offset or count are negative.</exception>
+        </member>
+        <member name="M:System.IO.HighwayStream.Seek(System.Int64,System.IO.SeekOrigin)">
+            <summary>
+            Moves the position.
+            </summary>
+            <returns>The new position.</returns>
+        </member>
+        <member name="M:System.IO.HighwayStream.SetLength(System.Int64)">
+            <summary>
+            If the value is greater than Length allocates more fragments,
+            otherwise disposes the unnecessary ones.
+            </summary>
+            <param name="value">The desired length.</param>
+        </member>
+        <member name="M:System.IO.HighwayStream.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Writes the buffer slice from offset to offset + count into the stream.
+            Unlike Read doesn't cut the count but throws. 
+            Allocates more fragments if there is not enough space.
+            </summary>
+            <param name="buffer">The source bytes.</param>
+            <param name="offset">Starting index in buffer.</param>
+            <param name="count">Number of bytes to take.</param>
+            <exception cref="T:System.ArgumentNullException">If buffer is null.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">
+            If offset or count are negative or count reaches beyond the fragment capacity.</exception>
+            <exception cref="T:System.ArgumentException">If the buffer slice from offset is smaller than count.</exception>
+        </member>
+        <member name="M:System.IO.HighwayStream.Dispose(System.Boolean)">
+            <summary>
+            Does not dispose the highway, just the allocated fragments.
+            </summary>
+        </member>
+        <member name="M:System.IO.HighwayStream.ReadByte">
+            <summary>
+            Reads the byte at Position and advances one slot
+            </summary>
+            <returns>The byte as int</returns>
+        </member>
+        <member name="M:System.IO.HighwayStream.WriteByte(System.Byte)">
+            <summary>
+            Writes the value at Position and advances one slot
+            </summary>
+            <param name="value">The byte</param>
+        </member>
+        <member name="M:System.IO.StreamExt.ReadFrom(System.IO.Stream,System.IO.Stream,System.Int32,System.Byte[])">
+            <summary>
+            Reads from the source stream and writes into the target.
+            </summary>
+            <param name="target">The receiver</param>
+            <param name="source"></param>
+            <param name="count">Number of bytes to read.</param>
+            <param name="spoon">A small reading buffer. If null, new byte[4000] is used.</param>
+            <returns>A task to await</returns>
+        </member>
+    </members>
+</doc>
